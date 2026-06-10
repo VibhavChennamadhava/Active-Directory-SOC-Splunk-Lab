@@ -1,0 +1,35 @@
+| Comment: ============================================================
+| Comment: MyDFIR Unauthorized Successful RDP Login Detection
+| Comment: ============================================================
+| Comment: Purpose       : Detect successful interactive RDP-style logons
+| Comment:                 (EventCode 4624, Logon Types 7 and 10) that
+| Comment:                 originate from outside the authorized corporate
+| Comment:                 IP range. Fires the Shuffle SOAR webhook so
+| Comment:                 the analyst can choose to disable the user.
+| Comment: Author        : Vibhav Chennamadhava
+| Comment: Date created  : 2026-06-10
+| Comment: Splunk version: 9.x (Enterprise free trial)
+| Comment: Index         : mydfir-ad
+| Comment: Alert name    : MyDFIR-Unauthorized-Successful-Login-RDP
+| Comment: Schedule      : * * * * *  (every minute, last 60 minutes)
+| Comment: Trigger       : number of results > 0
+| Comment: Throttle      : 24h per Source_Network_Address
+| Comment: Trigger action: Webhook -> Shuffle SOAR workflow
+| Comment: MITRE ATT&CK  : T1078 Valid Accounts, T1021.001 RDP
+| Comment: ============================================================
+| Comment: Filter rationale:
+| Comment:   EventCode=4624            : successful logon
+| Comment:   Logon_Type=7              : unlock / reconnected RDP session
+| Comment:   Logon_Type=10             : RemoteInteractive (RDP establish)
+| Comment:   Source_Network_Address=*  : must have a remote source set
+| Comment:   != "-"                    : strip Windows local-logon sentinel
+| Comment:   != 40.*                   : strip authorized corporate IPs
+| Comment: ============================================================
+
+index=mydfir-ad EventCode=4624
+(Logon_Type=7 OR Logon_Type=10)
+Source_Network_Address=*
+Source_Network_Address!="-"
+Source_Network_Address!=40.*
+| stats count by _time, ComputerName, Source_Network_Address, user, Logon_Type
+| sort -_time
