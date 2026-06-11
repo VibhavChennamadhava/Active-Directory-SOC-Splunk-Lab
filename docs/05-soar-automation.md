@@ -176,6 +176,51 @@ This phase is complete when:
 
 **Confirmation message fires before the disable actually applies.** Add a small delay node before the Get User Attributes step, or chain the Get User Attributes off the Disable User node's *success* output specifically so it doesn't race.
 
+---
+
+## Active Directory Integration — Known Limitation
+
+An Active Directory node was added to the Shuffle workflow to
+automatically disable the flagged user account upon analyst approval.
+The node was configured with the domain controller's public IP,
+LDAP port 389, domain administrator credentials, and base DN of
+`CN=Users,DC=MyDFIR,DC=local`.
+
+During testing, the node consistently failed with the following error:
+
+![Shuffle Active Directory MD4 Error](../screenshots/05-soar-workflow/AD_Auth_MD4_Error.png)
+*Shuffle SOAR returning a ValueError for unsupported MD4 hash type
+when attempting LDAP authentication against the Windows domain controller*
+
+```json
+{
+  "success": false,
+  "exception": "ValueError - unsupported hash type MD4",
+  "reason": "An exception occurred while running this function (2)."
+}
+```
+
+**Root Cause:** Shuffle's cloud-hosted Python runtime uses a hardened OpenSSL build with MD4 disabled due to cryptographic deprecation. Windows Active Directory's LDAP authentication relies on NTLM, which internally requires MD4 hashing — creating a direct incompatibility between Shuffle cloud and on-premises AD over standard LDAP port 389.
+
+**What was verified:** The Vultr firewall was confirmed open on port 389, the Windows DC firewall allowed inbound LDAP, LDAP signing was set to None in Group Policy, and multiple credential combinations were tested. The error persisted regardless — confirming this is a Shuffle cloud platform limitation rather than a configuration issue.
+
+**Impact on workflow:** The Discord alert notification, email analyst prompt, and User Input decision node all functioned correctly. The AD disable step represents the final action in the automation chain and is the only component that could not be completed via Shuffle cloud.
+
+**Path forward:** Documented under Future Improvements below — self-hosting Shuffle via Docker resolves this completely.
+
+## Future Improvements
+
+The following enhancements are planned to extend the lab's capability and resolve known limitations:
+
+- [ ] **Self-hosted Shuffle (Priority)** — Deploy Shuffle via Docker on the Ubuntu lab VM to resolve the MD4 LDAP limitation. Local Python environments allow MD4 through legacy OpenSSL configuration, enabling full end-to-end automated AD user disable without any cloud platform restrictions
+- [ ] **Complete the AD Disable Chain** — Once Shuffle is self-hosted, finish the full workflow: analyst approves → AD disables user → Get-User-Attributes confirms disabled status → Discord posts confirmation. This closes the loop on the entire response playbook
+- [ ] **Brute Force Detection Playbook** — Expand Splunk detection to EventCode 4625 (failed logon). A threshold of 5+ failures within 60 seconds from a single source IP would trigger a medium-severity alert, with a separate Shuffle workflow to temporarily block the IP via firewall API
+- [ ] **Threat Intel Enrichment** — Add an AbuseIPDB or VirusTotal API call as a Shuffle node between the webhook trigger and the Discord notification. This would automatically tag the source IP with a threat score and known abuse reports before the analyst sees the alert — reducing triage time
+- [ ] **Splunk Security Dashboard** — Build a dedicated Splunk dashboard with panels for: RDP login volume over time, top unauthorized source IPs, user accounts most frequently targeted, alert trigger history, and logon type breakdown
+- [ ] **Wazuh HIDS Integration** — Deploy Wazuh agents on both Windows endpoints alongside Splunk forwarders. Wazuh adds file integrity monitoring, rootkit detection, and compliance checks — forwarding alerts to Splunk for unified correlation
+- [ ] **pfSense Network Segmentation** — Add a pfSense VM as a perimeter firewall between the lab segments. This generates firewall log telemetry for Splunk ingestion and more closely mirrors a real enterprise network architecture
+- [ ] **Email Analyst Prompt Completion** — Implement the full Shuffle email-based analyst response where the analyst receives a formatted email with True/False hyperlinks. Clicking the link directly triggers the corresponding Shuffle branch without requiring any manual workflow interaction
+
 ## Key Concepts
 
 - **SOAR webhook trigger** — a no-code way to receive structured alerts from any system that can `POST` JSON. The webhook is the contract between SIEM and SOAR; everything downstream operates on the deserialized payload.

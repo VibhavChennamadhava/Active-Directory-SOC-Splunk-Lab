@@ -43,13 +43,33 @@ The public IP of each VM was captured to a scratch Notepad immediately after dep
 
 ### VPC enablement
 
+> **Why VPC Networking?** A Virtual Private Cloud (VPC) network was
+> enabled on each VM to create a private internal network interface
+> separate from the public internet. This allows all three VMs to
+> communicate over a trusted internal subnet (10.22.96.0/24) without
+> routing traffic through the public internet. Without VPC, Windows
+> assigned a 169.254.x.x APIPA address to the secondary network
+> interface — this self-assigned address indicated no DHCP server
+> was reachable on that interface, confirming the need to assign
+> static private IPs manually.
+
 Under each VM's **Settings → VPC Network** tab, the *Enable VPC* toggle was switched on. Vultr assigns a private IP automatically: `10.22.96.3` to the test machine, `10.22.96.4` to the domain controller, `10.22.96.5` to the Splunk host. Enabling VPC restarts the VM.
+
+The VPC settings tab in Vultr confirms the assigned private IP for each VM before any guest-side configuration begins.
+
+![Vultr VPC settings page showing the private IP assigned to the DC](../screenshots/01-environment-setup/VPC_Enable_Vultr.png)
+*Vultr's VPC Network panel — assigned private IP visible before any guest-side reconfiguration*
 
 ![Private VPC IP shown for the DC](../screenshots/01-environment-setup/myDFIRip.png)
 
 ### Static IP assignment on the VPC NIC (fixing the 169.x issue)
 
 After enabling VPC and rebooting, both Windows VMs came up with the new "Ethernet instance 02" NIC sitting on a `169.254.x.x` APIPA address rather than the expected `10.22.96.x` address. Vultr's VPC does not run DHCP — the guest has to be told its IP statically.
+
+The broken pre-fix state was visible immediately in `ipconfig` — the VPC NIC self-assigned a link-local address because no DHCP lease arrived.
+
+![Test machine ipconfig showing 169.254.x.x on the VPC NIC](../screenshots/01-environment-setup/169_Address_Before_Fix.png)
+*APIPA `169.254.x.x` address on Ethernet instance 02 — confirms DHCP failed and a static configuration is required*
 
 On each Windows VM:
 
@@ -62,7 +82,18 @@ On each Windows VM:
    - Default gateway: *(left blank — VPC peers don't need one)*
    - Preferred DNS server: *(left blank on the DC, set to the DC's VPC IP on the test machine for the domain join)*
 
+The static-IP dialog on the VPC NIC is where the manual `10.22.96.x` address is committed.
+
+![Windows TCP/IPv4 properties with static VPC IP set on the DC](../screenshots/01-environment-setup/Static_IP_Configuration.png)
+*Windows network adapter properties — static IP `10.22.96.4` / mask `255.255.240.0` applied to the VPC NIC*
+
 ![Changing the VPC NIC to a static IP on the DC](../screenshots/01-environment-setup/changingipmydfir.png)
+
+Re-running `ipconfig` confirms the NIC now holds the correct VPC address.
+
+![ipconfig after the fix showing 10.22.96.4 on the VPC NIC](../screenshots/01-environment-setup/IP_Config_After_Fix.png)
+*Post-fix `ipconfig` — the `169.x` is gone and the expected `10.22.96.x` address is now present*
+
 ![Static 10.22.96.4 confirmed via ipconfig](../screenshots/01-environment-setup/ipfixed_mydfir.png)
 ![New static IP visible on the test machine adapter](../screenshots/01-environment-setup/newip.png)
 
@@ -92,6 +123,11 @@ ping -c 4 10.22.96.4   # domain controller
 ```
 
 Initial pings returned *destination host unreachable* — the consequence of the still-broken `169.x` adapters on the Windows side. After the static IP fix above was applied, both pings returned immediately.
+
+Successful ICMP echo replies between all three VPC peers confirm L3 reachability across the private subnet — the pipe needed for Splunk forwarding and LDAP traffic in later phases.
+
+![Successful ping between VMs across the VPC](../screenshots/01-environment-setup/Connectivity_Ping_Test.png)
+*Successful ping from the Splunk host to both Windows VMs after the static-IP fix — VPC connectivity verified*
 
 ![Connectivity established between all three VMs](../screenshots/01-environment-setup/established_basicconbetween_machines.png)
 
